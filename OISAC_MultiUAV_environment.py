@@ -30,12 +30,18 @@ class ENV(gym.Env):
         uavs = 3,
         size = 2000,
         varphi_ = np.pi/4,
-        v0 = 50, # UAV's velocity (m/s)
+        v0 = 15, # UAV's velocity (m/s)
         tau = 1,
-        ##### FSO ######
-        noise_power_FSO = 1e-10, # (W)
-        P_FSO = 1, # (W)
-        B_FSO = 1e9, # (Hz)
+        ##### FSO Backhaul ######
+        noise_power_FSO_backhaul = 1e-10, # (W)
+        P_FSO_backhaul = 1, # (W)
+        B_FSO_backhaul = 1e9, # (Hz)
+        ##### RF Backhaul ######
+        noise_power_RF_backhaul = 1e-10, # (W)
+        P_RF_backhaul = 100, # (W)
+        B_RF_backhaul = 1e9, # (Hz)
+        frequency_RF_backhaul = [6e9, 7e9, 8e9], # (Hz)
+        ##### RF Access ######
         noise_power = 1e-14, # (W)
         P_UAV = 50, # (W) -> 
         B_RF = 20e6, # (Hz) 
@@ -60,16 +66,24 @@ class ENV(gym.Env):
         ############## UAV Environment ##################################
         self.users = users
         self.uavs = uavs
-
         self.size = size
         self.varphi_ = varphi_
         self.UAV_coverage = self.h_UAV*math.tan(self.varphi_)
         self.v_0 = v0
         self.tau = tau
-        self.P_FSO = P_FSO
-        self.B_FSO = B_FSO
+        ############## FSO Backhaul ############################
+        self.P_FSO_backhaul = P_FSO_backhaul
+        self.B_FSO_backhaul = B_FSO_backhaul
         self.C_FSO = np.zeros(self.uavs)
-        self.noise_power_FSO = noise_power_FSO
+        self.noise_power_FSO_backhaul = noise_power_FSO_backhaul
+        ############## RF Backhaul ############################
+        self.noise_power_RF_backhaul = noise_power_RF_backhaul
+        self.P_RF_backhaul = P_RF_backhaul
+        self.B_RF_backhaul = B_RF_backhaul
+        self.frequency_RF_backhaul = frequency_RF_backhaul
+        self.C_RF_backhaul = np.zeros(self.uavs)
+        self.C_FSO_or_RF = np.zeros(self.uavs) # FSO or RF backhaul capacity, depending on the environment conditions
+        ############## RF Access ############################
         self.noise_power = noise_power
         self.P_UAV = np.zeros(self.uavs) + 50
         self.B_RF = B_RF 
@@ -230,8 +244,12 @@ class ENV(gym.Env):
 
         return geo_loss*atmospheric_loss
     def RF_gain(self,UAV_index):
-        
-        return
+        distance_BS_UAV = math.sqrt((self.uavs_location[0,UAV_index])**2 + (self.uavs_location[1,UAV_index])**2 + (self.h_UAV-self.h_BS)**2)
+        path_loss_RF_backhaul = (4*math.pi*distance_BS_UAV*self.frequency_RF_backhaul[UAV_index]/3e8)**(-2) # Free-space path loss
+        Gain_t = 1 # Transmitter antenna gain (linear scale)
+        Gain_r = 1 # Receiver antenna gain (linear scale)
+        RF_gain = Gain_t * Gain_r/path_loss_RF_backhaul
+        return RF_gain
 
     def step(self,actions):
         ########################### Reset each step ##################################################
@@ -273,20 +291,34 @@ class ENV(gym.Env):
         self.Visibility += step
         self.Visibility = np.clip(self.Visibility, 0, 200)  # Restrict visibility to a reasonable range
         ################################# Geometric Loss & Atmospheric Loss ##############################
-        FSO_gain = []
+        FSO_backhaul_gain = []
         for UAV_i in range(self.uavs):
-            FSO_gain.append(self.FSO_gain(UAV_i,self.Visibility))
+            FSO_backhaul_gain.append(self.FSO_gain(UAV_i,self.Visibility))
         # print("Geometric Loss: ", geo_loss)
-
+        RF_backhaul_gain = []
+        for UAV_i in range(self.uavs):
+            RF_backhaul_gain.append(self.RF_gain(UAV_i,self.Visibility))
 
         ################################## FSO Capacity ###########################################
 
+        SNR_FSO_backhaul = []
         for UAV_i in range(self.uavs):
-            SNR = math.e * self.P_FSO**2 * FSO_gain[UAV_i]**2 * self.photon_responsitivity**2/ (2*np.pi*self.noise_power_FSO) 
-            self.C_FSO[UAV_i] = 1/2 * self.B_FSO*math.log2(1+SNR)
-            print("FSO Capacity of UAV", UAV_i, ": ", self.C_FSO[UAV_i]/1e9, "Gbps")
-            # self.C_FSO[UAV_i] = random.choice([0.1, 0.5])*self.C_FSO[UAV_i] # Randomly fluctuate FSO capacity to simulate the real environment
+            SNR = math.e * self.P_FSO_backhaul**2 * FSO_backhaul_gain[UAV_i]**2 * self.photon_responsitivity**2/ (2*np.pi*self.noise_power_FSO_backhaul)
+            self.C_FSO[UAV_i] = 1/2 * self.B_FSO_backhaul*math.log2(1+SNR)
+            SNR_FSO_backhaul.append(SNR)
 
+        SNR_RF_backhaul = []
+        for UAV_i in range(self.uavs):
+            SNR = self.P_RF_backhaul*RF_backhaul_gain[UAV_i]/self.noise_power_RF_backhaul
+            self.C_RF_backhaul[UAV_i] = self.B_RF_backhaul*math.log2(1+SNR)
+            SNR_RF_backhaul.append(SNR)
+
+        ########## Link Selection between FSO and RF backhaul #############
+        for UAV_i in range(self.uavs):
+            if self.C_FSO[UAV_i] >= self.C_RF_backhaul[UAV_i]:
+                self.C_FSO_or_RF[UAV_i] = self.C_FSO[UAV_i]
+            else:
+                self.C_FSO_or_RF[UAV_i] = self.C_RF_backhaul[UAV_i]
         ###########################################################################################
 
         ## Distance
@@ -307,7 +339,7 @@ class ENV(gym.Env):
         # JUST ONE UAV , IF MULTIPLE UAVS, please change this one
         remaining_backhaul = []
         for UAV_i in range(self.uavs):
-            C_FSO_temp = self.C_FSO[UAV_i]
+            C_FSO_temp = self.C_FSO_or_RF[UAV_i]
             for i in range(P_total_needed_index.shape[1]):
                 if self.P_UAV[UAV_i] < P_total_needed[UAV_i,P_total_needed_index[UAV_i,i]]:
                     break
@@ -377,9 +409,9 @@ class ENV(gym.Env):
 
 
 
-        O_UAV0 = np.concatenate((self.uavs_location[:,0]/100,self.uavs_location[:,1]/100,self.uavs_location[:,2]/100,np.reshape(self.heatmap_users+self.heatmap_UAV0,self.grid_num**2), np.array([self.C_FSO[0] / 1e9])))
-        O_UAV1 = np.concatenate((self.uavs_location[:,0]/100,self.uavs_location[:,1]/100,self.uavs_location[:,2]/100,np.reshape(self.heatmap_users+self.heatmap_UAV1,self.grid_num**2), np.array([self.C_FSO[1] / 1e9])))
-        O_UAV2 = np.concatenate((self.uavs_location[:,0]/100,self.uavs_location[:,1]/100,self.uavs_location[:,2]/100,np.reshape(self.heatmap_users+self.heatmap_UAV2,self.grid_num**2), np.array([self.C_FSO[2] / 1e9])))
+        O_UAV0 = np.concatenate((self.uavs_location[:,0]/100,self.uavs_location[:,1]/100,self.uavs_location[:,2]/100,np.reshape(self.heatmap_users+self.heatmap_UAV0,self.grid_num**2), np.array([self.C_FSO_or_RF[0] / 1e9])))
+        O_UAV1 = np.concatenate((self.uavs_location[:,0]/100,self.uavs_location[:,1]/100,self.uavs_location[:,2]/100,np.reshape(self.heatmap_users+self.heatmap_UAV1,self.grid_num**2), np.array([self.C_FSO_or_RF[1] / 1e9])))
+        O_UAV2 = np.concatenate((self.uavs_location[:,0]/100,self.uavs_location[:,1]/100,self.uavs_location[:,2]/100,np.reshape(self.heatmap_users+self.heatmap_UAV2,self.grid_num**2), np.array([self.C_FSO_or_RF[2] / 1e9])))
 
         # arr_supported_users = np.array([self.S_UAV0,self.S_UAV1,self.S_UAV2,self.N_UAV0,self.N_UAV1,self.N_UAV2])
         # O_IRS = np.concatenate((self.uavs_location[:,0],self.uavs_location[:,1],self.uavs_location[:,2],np.reshape(self.heatmap_users_unsatisfied,self.grid_num**2),np.reshape(self.heatmap_UAV0,self.grid_num**2),np.reshape(self.heatmap_UAV1,self.grid_num**2),np.reshape(self.heatmap_UAV2,self.grid_num**2),np.reshape(self.heatmap_CLWC(),10**2),self.C_FSO/(1e9),arr_supported_users,self.irs))
@@ -546,9 +578,9 @@ class ENV(gym.Env):
 
         ####### Observations ######
 
-        O_UAV0 = np.concatenate((self.uavs_location[:,0]/100,self.uavs_location[:,1]/100,self.uavs_location[:,2]/100,np.reshape(self.heatmap_users+self.heatmap_UAV0,self.grid_num**2), np.array([self.C_FSO[0] / 1e9])))
-        O_UAV1 = np.concatenate((self.uavs_location[:,0]/100,self.uavs_location[:,1]/100,self.uavs_location[:,2]/100,np.reshape(self.heatmap_users+self.heatmap_UAV1,self.grid_num**2), np.array([self.C_FSO[1] / 1e9])))
-        O_UAV2 = np.concatenate((self.uavs_location[:,0]/100,self.uavs_location[:,1]/100,self.uavs_location[:,2]/100,np.reshape(self.heatmap_users+self.heatmap_UAV2,self.grid_num**2), np.array([self.C_FSO[2] / 1e9])))
+        O_UAV0 = np.concatenate((self.uavs_location[:,0]/100,self.uavs_location[:,1]/100,self.uavs_location[:,2]/100,np.reshape(self.heatmap_users+self.heatmap_UAV0,self.grid_num**2), np.array([self.C_FSO_or_RF[0] / 1e9])))
+        O_UAV1 = np.concatenate((self.uavs_location[:,0]/100,self.uavs_location[:,1]/100,self.uavs_location[:,2]/100,np.reshape(self.heatmap_users+self.heatmap_UAV1,self.grid_num**2), np.array([self.C_FSO_or_RF[1] / 1e9])))
+        O_UAV2 = np.concatenate((self.uavs_location[:,0]/100,self.uavs_location[:,1]/100,self.uavs_location[:,2]/100,np.reshape(self.heatmap_users+self.heatmap_UAV2,self.grid_num**2), np.array([self.C_FSO_or_RF[2] / 1e9])))
 
         arr_supported_users = np.array([self.S_UAV0,self.S_UAV1,self.S_UAV2,self.N_UAV0,self.N_UAV1,self.N_UAV2])
 

@@ -242,7 +242,7 @@ def reinforce(
 h_size = 128
 lr = 0.001
 n_training_episodes = 4000
-max_steps = 100
+max_steps = 300
 gamma = 0.99
 
 policy = [Policy().to(device) for _ in range(3)]
