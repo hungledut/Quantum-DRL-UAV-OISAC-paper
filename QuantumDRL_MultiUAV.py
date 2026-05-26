@@ -234,14 +234,16 @@ def reinforce(
         print(" Episode {}, Reward : {}".format( i_episode ,sum(rewards_UAV0) + sum(rewards_UAV1) + sum(rewards_UAV2)))
         if i_episode % 10 == 0:
             env.plot()
-
+            for i in range(3):
+                torch.save(policy[i].state_dict(), "model_UAV{}.pth".format(i))
+        
 
     return scores
 
 # Hyperparameter
 h_size = 128
 lr = 0.001
-n_training_episodes = 4000
+n_training_episodes = 8000
 max_steps = 300
 gamma = 0.99
 

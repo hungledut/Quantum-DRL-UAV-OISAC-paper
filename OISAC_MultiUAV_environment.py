@@ -30,24 +30,24 @@ class ENV(gym.Env):
         uavs = 3,
         size = 2000,
         varphi_ = np.pi/4,
-        v0 = 15, # UAV's velocity (m/s)
+        v0 = 20, # UAV's velocity (m/s)
         tau = 1,
         ##### FSO Backhaul ######
         noise_power_FSO_backhaul = 1e-10, # (W)
         P_FSO_backhaul = 1, # (W)
         B_FSO_backhaul = 1e9, # (Hz)
         ##### RF Backhaul ######
-        noise_power_RF_backhaul = 1e-10, # (W)
-        P_RF_backhaul = 100, # (W)
-        B_RF_backhaul = 1e9, # (Hz)
-        frequency_RF_backhaul = [6e9, 7e9, 8e9], # (Hz)
+        noise_power_RF_backhaul = 1e-4, # (W)
+        P_RF_backhaul = 50, # (W)
+        B_RF_backhaul = 50e6, # (Hz)
+        frequency_RF_backhaul = [2e9, 2.1e9, 2.2e9], # (Hz)
         ##### RF Access ######
         noise_power = 1e-14, # (W)
         P_UAV = 50, # (W) -> 
         B_RF = 20e6, # (Hz) 
         Total_bandwidth_RF = 3e9, # (GHz)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                    
         r_th = 100e6, # (bps) ~ 20Mbps
-        max_step = 100,
+        max_step = 300,
         grid_num = 5,
         ####### Train or Test ? #######
         test = False,
@@ -287,7 +287,7 @@ class ENV(gym.Env):
         self.UAV2_behavior[:,self.step_] = self.uavs_location[:,2]
         self.step_ += 1
         ################## Visibility varies over time due to Fog #########
-        step = np.random.uniform(-1, 1) # Randomly fluctuate visibility to simulate the real environment
+        step = np.random.uniform(-2, 2) # Randomly fluctuate visibility to simulate the real environment
         self.Visibility += step
         self.Visibility = np.clip(self.Visibility, 0, 200)  # Restrict visibility to a reasonable range
         ################################# Geometric Loss & Atmospheric Loss ##############################
@@ -297,7 +297,7 @@ class ENV(gym.Env):
         # print("Geometric Loss: ", geo_loss)
         RF_backhaul_gain = []
         for UAV_i in range(self.uavs):
-            RF_backhaul_gain.append(self.RF_gain(UAV_i,self.Visibility))
+            RF_backhaul_gain.append(self.RF_gain(UAV_i))
 
         ################################## FSO Capacity ###########################################
 
@@ -305,12 +305,14 @@ class ENV(gym.Env):
         for UAV_i in range(self.uavs):
             SNR = math.e * self.P_FSO_backhaul**2 * FSO_backhaul_gain[UAV_i]**2 * self.photon_responsitivity**2/ (2*np.pi*self.noise_power_FSO_backhaul)
             self.C_FSO[UAV_i] = 1/2 * self.B_FSO_backhaul*math.log2(1+SNR)
+            # print("FSO Backhaul Capacity UAV ", UAV_i, ": ", self.C_FSO[UAV_i]/1e9, " Gbps")
             SNR_FSO_backhaul.append(SNR)
 
         SNR_RF_backhaul = []
         for UAV_i in range(self.uavs):
             SNR = self.P_RF_backhaul*RF_backhaul_gain[UAV_i]/self.noise_power_RF_backhaul
             self.C_RF_backhaul[UAV_i] = self.B_RF_backhaul*math.log2(1+SNR)
+            # print("RF Backhaul Capacity UAV ", UAV_i, ": ", self.C_RF_backhaul[UAV_i]/1e9, " Gbps")
             SNR_RF_backhaul.append(SNR)
 
         ########## Link Selection between FSO and RF backhaul #############
