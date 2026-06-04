@@ -32,8 +32,8 @@ class Policy(tq.QuantumModule):
         def __init__(self):
             super().__init__()
             self.n_wires = 5
-            self.random_layer = tq.RandomLayer(n_ops=200,
-                                               wires=list(range(self.n_wires)))
+            # self.random_layer = tq.RandomLayer(n_ops=200,
+            #                                    wires=list(range(self.n_wires)))
             # gates with trainable parameters
             self.rx0 = tq.RX(has_params=True, trainable=True)
             self.ry0 = tq.RY(has_params=True, trainable=True)
@@ -243,7 +243,7 @@ def reinforce(
 # Hyperparameter
 h_size = 128
 lr = 0.001
-n_training_episodes = 8000
+n_training_episodes = 4000
 max_steps = 300
 gamma = 0.99
 
