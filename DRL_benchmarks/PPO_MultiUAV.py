@@ -436,10 +436,10 @@ while time_step <= max_training_timesteps:
             for agent in ppo_agent:
                 agent.decay_action_std(action_std_decay_rate, min_action_std)
 
-
         # break; if the episode is over
         if all(done):
             break
+    env.plot()
 
 
     print('Episode ', i_episode, ': Reward = ', current_ep_reward)

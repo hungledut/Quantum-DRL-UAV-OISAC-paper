@@ -51,8 +51,10 @@ class ENV(gym.Env):
         grid_num = 5,
         ####### Train or Test ? #######
         test = False,
+        seed = 42,
         ###### Gauss-Markov Mobility Model for User Moving #########
-        user_moving_percent = 0.2 # percentage of user moving
+        user_moving_percent = 0.2, # percentage of user moving
+        link_switching = True
         ):
 
         self.lambda_ = np.array(lambda_)
@@ -130,6 +132,7 @@ class ENV(gym.Env):
         # self.cloud_range = int(1/self.cloud_moving_step * self.max_step)
         ##### Train or Test ??? ###########
         self.test = test
+        self.seed = seed
         ###### Gauss-Markov Mobility for User Moving ###############
         self.s_markov = np.zeros(self.users)
         self.d_markov = np.zeros(self.users)
@@ -163,10 +166,17 @@ class ENV(gym.Env):
             4: np.array([self.v_0*self.tau, 0]),  # right
         }
         self.FSO_RF_switching_mode = [0,0,0] # 0: FSO backhaul, 1: RF backhaul, 2: Link selection between FSO and RF backhaul based on the environment conditions
-    
+
+        self.link_switching = link_switching
+
     def users_markov(self,random_user_list):
-        s_random = np.random.normal(0, 1)
-        d_random = np.random.normal(0, 45)
+        if self.test:
+            np.random.seed(self.seed) # Set the seed for reproducibility in testing
+            s_random = np.random.normal(0, 1)
+            d_random = np.random.normal(0, 45)
+        else:
+            s_random = np.random.normal(0, 1)
+            d_random = np.random.normal(0, 45)
         self.s_markov = self.al*self.s_markov + (1-self.al)*self.s_mean + math.sqrt(1-self.al**2)*s_random
         self.d_markov = self.al*self.d_markov + (1-self.al)*self.d_mean + math.sqrt(1-self.al**2)*d_random
         for i in random_user_list:
@@ -288,9 +298,13 @@ class ENV(gym.Env):
         self.UAV2_behavior[:,self.step_] = self.uavs_location[:,2]
         self.step_ += 1
         ################## Visibility varies over time due to Fog #########
-        step = np.random.uniform(-1, 1) # Randomly fluctuate visibility to simulate the real environment
+        if self.test:
+            np.random.seed(self.seed) # Set the seed for reproducibility in testing
+            step = np.random.uniform(-0.5, 0.5) # Randomly fluctuate visibility to simulate the real environment
+        else: 
+            step = np.random.uniform(-0.5, 0.5) 
         self.Visibility += step
-        self.Visibility = 0.5
+        # self.Visibility = 6
         self.Visibility = np.clip(self.Visibility, 0.5, 10)  # Restrict visibility to a reasonable range
         ################################# Geometric Loss & Atmospheric Loss ##############################
         FSO_backhaul_gain = []
@@ -322,12 +336,17 @@ class ENV(gym.Env):
         ########## Link Selection between FSO and RF backhaul #############
         for UAV_i in range(self.uavs):
             print("UAV ", UAV_i, ": FSO Backhaul Capacity = ", self.C_FSO[UAV_i]/1e9, " Gbps, RF Backhaul Capacity = ", self.C_RF_backhaul[UAV_i]/1e9, " Gbps")
-            if self.C_FSO[UAV_i] >= self.C_RF_backhaul[UAV_i]:
+            
+            if self.link_switching:
+                if self.C_FSO[UAV_i] >= self.C_RF_backhaul[UAV_i]:
+                    self.C_FSO_or_RF[UAV_i] = self.C_FSO[UAV_i]
+                    self.FSO_RF_switching_mode[UAV_i] = 0
+                else:
+                    self.C_FSO_or_RF[UAV_i] = self.C_RF_backhaul[UAV_i]
+                    self.FSO_RF_switching_mode[UAV_i] = 1
+            else:
                 self.C_FSO_or_RF[UAV_i] = self.C_FSO[UAV_i]
                 self.FSO_RF_switching_mode[UAV_i] = 0
-            else:
-                self.C_FSO_or_RF[UAV_i] = self.C_RF_backhaul[UAV_i]
-                self.FSO_RF_switching_mode[UAV_i] = 1
         ###########################################################################################
 
         ## Distance
@@ -436,7 +455,7 @@ class ENV(gym.Env):
 
         std_remain_users = np.std(np.array([abs(self.N_UAV0 - self.S_UAV0),abs(self.N_UAV1 - self.S_UAV1),abs(self.N_UAV2 - self.S_UAV2)]))
 
-        return [O_UAV0, O_UAV1, O_UAV2], [self.S_UAV0/10, self.S_UAV1/10, self.S_UAV2/10], False, None, None   # [O_UAV0, O_UAV1, O_UAV2],sum([self.N_UAV0 , self.N_UAV1 , self.N_UAV2])/10
+        return [O_UAV0, O_UAV1, O_UAV2], [self.S_UAV0/10, self.S_UAV1/10, self.S_UAV2/10], False, [self.S_UAV0, self.S_UAV1, self.S_UAV2], self.Visibility   # [O_UAV0, O_UAV1, O_UAV2],sum([self.N_UAV0 , self.N_UAV1 , self.N_UAV2])/10
     
     def power_allocation(self,gain_UAV):
         P_total_needed = np.zeros((self.uavs,self.users))
@@ -452,7 +471,7 @@ class ENV(gym.Env):
     def plot(self):
         ######################################### UAVs' colour ################################
         color_uav = ['purple','green','blue']
-        plt.rcParams.update({'font.size': 13})
+        plt.rcParams.update({'font.size': 15})
         ######################################### For Visualization ################################
 
         ## Distance
@@ -607,7 +626,12 @@ class ENV(gym.Env):
 
         # Set seed for reproducible user distribution only
         # rng = np.random.default_rng(42)
-        self.users_location = np.clip(np.random.normal(loc=1000, scale=300, size=(2, self.users)),0, 1999)
+        if self.test:
+            np.random.seed(42)  # Set seed for reproducibility in test mode
+            self.users_location = np.clip(np.random.normal(loc=1000, scale=300, size=(2, self.users)),0, 1999)
+        else: 
+            self.users_location = np.clip(np.random.normal(loc=1000, scale=300, size=(2, self.users)),0, 1999)
+
         self.satisfied_users = np.zeros(self.users)
         self.UAV0_behavior = np.zeros((2, self.max_step))
         self.UAV1_behavior = np.zeros((2, self.max_step))

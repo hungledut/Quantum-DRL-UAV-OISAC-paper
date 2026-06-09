@@ -19,7 +19,6 @@ device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 print(device)
 
 # Initialize the environment
-env = ENV() #render_mode="human"
 
 class Policy(tq.QuantumModule):
     class QLayer(tq.QuantumModule):
@@ -146,15 +145,36 @@ class Policy(tq.QuantumModule):
 
 
 if __name__ == '__main__':
+    link_switching = False
+    env = ENV(link_switching=link_switching, test = True, seed=350) #render_mode="human"
     policy = [Policy().to(device) for _ in range(3)]
     for i in range(3):
         policy[i].load_state_dict(torch.load('QDRL_weights/model_UAV'+str(i)+'.pth',map_location="cpu"), strict=False)
 
+    number_of_sp_users_UAV0 = []
+    number_of_sp_users_UAV1 = []
+    number_of_sp_users_UAV2 = []
+    Visibility = []
     state = env.reset()
     for t in range(300):
         action_UAV0 , log_prob_UAV0 = policy[0].forward(state[0])
         action_UAV1 , log_prob_UAV1 = policy[1].forward(state[1])
         action_UAV2 , log_prob_UAV2 = policy[2].forward(state[2])
-        state , _ , _ , _ , _ = env.step([action_UAV0, action_UAV1, action_UAV2])
+        state , _ , _ , sp_users , visibility = env.step([action_UAV0, action_UAV1, action_UAV2])
+        number_of_sp_users_UAV0.append(sp_users[0])
+        number_of_sp_users_UAV1.append(sp_users[1])
+        number_of_sp_users_UAV2.append(sp_users[2])
+        Visibility.append(visibility)
         if t%50==0:
             env.plot()
+        print(f"Step: {t}, SP Users: {sp_users}")
+    if link_switching:
+        np.save('number_of_sp_users_UAV0.npy', number_of_sp_users_UAV0)
+        np.save('number_of_sp_users_UAV1.npy', number_of_sp_users_UAV1)
+        np.save('number_of_sp_users_UAV2.npy', number_of_sp_users_UAV2)
+        np.save('Visibility.npy', Visibility)
+    else:
+        np.save('number_of_sp_users_UAV0_no_switching.npy', number_of_sp_users_UAV0)
+        np.save('number_of_sp_users_UAV1_no_switching.npy', number_of_sp_users_UAV1)
+        np.save('number_of_sp_users_UAV2_no_switching.npy', number_of_sp_users_UAV2)
+        # np.save('Visibility_no_switching.npy', Visibility)
