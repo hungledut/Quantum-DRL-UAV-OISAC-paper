@@ -50,6 +50,15 @@ class Policy(tq.QuantumModule):
             self.rx4 = tq.RX(has_params=True, trainable=True)  
             self.ry4 = tq.RY(has_params=True, trainable=True)
             self.rz4 = tq.RZ(has_params=True, trainable=True)
+            self.rx5 = tq.RX(has_params=True, trainable=True)  
+            self.ry5 = tq.RY(has_params=True, trainable=True)
+            self.rz5 = tq.RZ(has_params=True, trainable=True)
+            self.rx6 = tq.RX(has_params=True, trainable=True)
+            self.ry6 = tq.RY(has_params=True, trainable=True)
+            self.rz6 = tq.RZ(has_params=True, trainable=True)
+            self.rx7 = tq.RX(has_params=True, trainable=True)
+            self.ry7 = tq.RY(has_params=True, trainable=True)
+            self.rz7 = tq.RZ(has_params=True, trainable=True)
 
         @tq.static_support
         def forward(self, q_device: tq.QuantumDevice):
@@ -80,20 +89,32 @@ class Policy(tq.QuantumModule):
             self.rx2(self.q_device, wires=2)
             self.rx3(self.q_device, wires=3)
             self.rx4(self.q_device, wires=4)
+            # self.rx5(self.q_device, wires=5)
+            # self.rx6(self.q_device, wires=6)
+            # self.rx7(self.q_device, wires=7)
             self.ry0(self.q_device, wires=0)
             self.ry1(self.q_device, wires=1)
             self.ry2(self.q_device, wires=2)
             self.ry3(self.q_device, wires=3)
             self.ry4(self.q_device, wires=4)
+            # self.ry5(self.q_device, wires=5)
+            # self.ry6(self.q_device, wires=6)
+            # self.ry7(self.q_device, wires=7)
             self.rz0(self.q_device, wires=0)
             self.rz1(self.q_device, wires=1)
             self.rz2(self.q_device, wires=2)
             self.rz3(self.q_device, wires=3)
             self.rz4(self.q_device, wires=4)
+            # self.rz5(self.q_device, wires=5)
+            # self.rz6(self.q_device, wires=6)
+            # self.rz7(self.q_device, wires=7)
             tqf.cnot(self.q_device, wires=[1, 0])
             tqf.cnot(self.q_device, wires=[2, 1])
             tqf.cnot(self.q_device, wires=[3, 2])
             tqf.cnot(self.q_device, wires=[4, 3])
+            # tqf.cnot(self.q_device, wires=[5, 4])
+            # tqf.cnot(self.q_device, wires=[6, 5])
+            # tqf.cnot(self.q_device, wires=[7, 6])
             # tqf.cnot(self.q_device, wires=[0, 3])
             # tqf.cnot(self.q_device, wires=[1, 3])
             # tqf.cnot(self.q_device, wires=[0, 3])
@@ -105,7 +126,7 @@ class Policy(tq.QuantumModule):
         # self.encoder = tq.GeneralEncoder(tq.encoder_op_list_name_dict['5_ry'])
 
 
-        self.q_layer = nn.ModuleList([self.QLayer() for _ in range(8)])
+        self.q_layer = nn.ModuleList([self.QLayer() for _ in range(5)])
 
         self.measure = tq.MeasureAll(tq.PauliZ)
 
@@ -118,7 +139,7 @@ class Policy(tq.QuantumModule):
         # output_ = self.fc2(F.relu(self.fc1(x)))
         
         x = torch.from_numpy(x).float().unsqueeze(0)
-        # x = F.pad(x, (0, 2**self.n_wires - 31))
+        # x = F.pad(x, (0, 2**self.n_wires - 208))
         if use_qiskit:
             x = self.qiskit_processor.process_parameterized(self.q_device, self.encoder, self.q_layer, self.measure, x)
         else:
@@ -134,6 +155,7 @@ class Policy(tq.QuantumModule):
                 self.q_layer[1](q_device)
                 self.q_layer[2](q_device)
                 self.q_layer[3](q_device)
+                self.q_layer[4](q_device)
 
 
                 output = self.measure(q_device)
@@ -143,7 +165,15 @@ class Policy(tq.QuantumModule):
 
 
         # x = x.reshape(x.shape[0], 2, 2).sum(-1)#.squeeze()
-        x = F.softmax(x)
+        # y = torch.stack([
+        #                 x[:, 0],
+        #                 x[:, 1] + x[:, 2],
+        #                 x[:, 3] + x[:, 4],
+        #                 x[:, 5] + x[:, 6],
+        #                 x[:, 7]
+        #             ], dim=1)
+
+        x = F.softmax(x, dim=1)
         m = Categorical(x)
         # Random action
         action = m.sample()

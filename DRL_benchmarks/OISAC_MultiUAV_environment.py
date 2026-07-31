@@ -21,8 +21,8 @@ class ENV(gym.Env):
         h_UAV = 350, # (m)
         h_BS = 5, # (m) height of the base station
         ###################### Geo Loss & Atmospheric Loss ######################
-        aperture_radius = 10e-2, # (m) radius of aperture
-        divergence_angle = 1e-3, # (rad) divergence angle of the beam
+        aperture_diameter = 2e-1, # (m) diameter of aperture
+        divergence_angle = 1e-4, # (rad) divergence angle of the beam
         photon_responsitivity = 0.9, # (A/W) photon responsitivity of the photodetector
  
         ###################### UAV Environment #########################
@@ -33,12 +33,12 @@ class ENV(gym.Env):
         v0 = 20, # UAV's velocity (m/s)
         tau = 1,
         ##### FSO Backhaul ######
-        noise_power_FSO_backhaul = 1e-10, # (W)
-        P_FSO_backhaul = 1, # (W)
+        noise_power_FSO_backhaul = 1e-4, # (W)
+        P_FSO_backhaul = 0.4, # (W) 0.4
         B_FSO_backhaul = 1e9, # (Hz)
         ##### RF Backhaul ######
-        noise_power_RF_backhaul = 1e-4, # (W)
-        P_RF_backhaul = 50, # (W)
+        noise_power_RF_backhaul = 1e-6, # (W)
+        P_RF_backhaul = 100, # (W)
         B_RF_backhaul = 50e6, # (Hz)
         frequency_RF_backhaul = [2e9, 2.1e9, 2.2e9], # (Hz)
         ##### RF Access ######
@@ -51,15 +51,17 @@ class ENV(gym.Env):
         grid_num = 5,
         ####### Train or Test ? #######
         test = False,
+        seed = 42,
         ###### Gauss-Markov Mobility Model for User Moving #########
-        user_moving_percent = 0.2 # percentage of user moving
+        user_moving_percent = 0.2, # percentage of user moving
+        link_switching = True
         ):
 
         self.lambda_ = np.array(lambda_)
         self.h_UAV = h_UAV
         self.h_BS = h_BS
         ###################### Geometric Loss #########################
-        self.aperture_radius = aperture_radius
+        self.aperture_diameter = aperture_diameter 
         self.divergence_angle = divergence_angle
         self.photon_responsitivity = photon_responsitivity
         self.Visibility = np.random.uniform(40, 100) # Randomly fluctuate visibility to simulate the real environment
@@ -130,6 +132,7 @@ class ENV(gym.Env):
         # self.cloud_range = int(1/self.cloud_moving_step * self.max_step)
         ##### Train or Test ??? ###########
         self.test = test
+        self.seed = seed
         ###### Gauss-Markov Mobility for User Moving ###############
         self.s_markov = np.zeros(self.users)
         self.d_markov = np.zeros(self.users)
@@ -162,11 +165,18 @@ class ENV(gym.Env):
             3: np.array([0, -self.v_0*self.tau]),  # down
             4: np.array([self.v_0*self.tau, 0]),  # right
         }
+        self.FSO_RF_switching_mode = [0,0,0] # 0: FSO backhaul, 1: RF backhaul, 2: Link selection between FSO and RF backhaul based on the environment conditions
 
-    
+        self.link_switching = link_switching
+
     def users_markov(self,random_user_list):
-        s_random = np.random.normal(0, 1)
-        d_random = np.random.normal(0, 45)
+        if self.test:
+            np.random.seed(self.seed) # Set the seed for reproducibility in testing
+            s_random = np.random.normal(0, 1)
+            d_random = np.random.normal(0, 45)
+        else:
+            s_random = np.random.normal(0, 1)
+            d_random = np.random.normal(0, 45)
         self.s_markov = self.al*self.s_markov + (1-self.al)*self.s_mean + math.sqrt(1-self.al**2)*s_random
         self.d_markov = self.al*self.d_markov + (1-self.al)*self.d_mean + math.sqrt(1-self.al**2)*d_random
         for i in random_user_list:
@@ -224,7 +234,8 @@ class ENV(gym.Env):
     # Backhaul RF Capacity
     def FSO_gain(self,UAV_index,V): # RF-based backhaul
         distance_BS_UAV = math.sqrt((self.uavs_location[0,UAV_index])**2 + (self.uavs_location[1,UAV_index])**2 + (self.h_UAV-self.h_BS)**2)
-        geo_loss = math.erf(math.sqrt(np.pi)*self.aperture_radius/(2*math.sqrt(2)*self.divergence_angle*distance_BS_UAV))**2
+        geo_loss = math.erf(math.sqrt(np.pi)*self.aperture_diameter/(2*math.sqrt(2)*self.divergence_angle*distance_BS_UAV))**2
+        # print(geo_loss)
         epsilon = 0
         if V > 50:
             epsilon = 1.6
@@ -239,9 +250,9 @@ class ENV(gym.Env):
 
         attenuation_coefficient = 3.91/V * (self.lambda_[UAV_index]/550e-9)**(-epsilon) # (dB/km)
         noise = np.random.normal(0, 0.05)
-
-        atmospheric_loss = math.exp(-attenuation_coefficient*distance_BS_UAV) 
-
+        #print("Attenuation Coefficient: ", attenuation_coefficient, " dB/km")
+        atmospheric_loss = math.exp(-attenuation_coefficient*distance_BS_UAV/1000) 
+        #print(geo_loss,atmospheric_loss)
         return geo_loss*atmospheric_loss
     def RF_gain(self,UAV_index):
         distance_BS_UAV = math.sqrt((self.uavs_location[0,UAV_index])**2 + (self.uavs_location[1,UAV_index])**2 + (self.h_UAV-self.h_BS)**2)
@@ -287,13 +298,19 @@ class ENV(gym.Env):
         self.UAV2_behavior[:,self.step_] = self.uavs_location[:,2]
         self.step_ += 1
         ################## Visibility varies over time due to Fog #########
-        step = np.random.uniform(-2, 2) # Randomly fluctuate visibility to simulate the real environment
+        if self.test:
+            np.random.seed(self.seed) # Set the seed for reproducibility in testing
+            step = np.random.uniform(-0.5, 0.5) # Randomly fluctuate visibility to simulate the real environment
+        else: 
+            step = np.random.uniform(-0.5, 0.5) 
         self.Visibility += step
-        self.Visibility = np.clip(self.Visibility, 0, 200)  # Restrict visibility to a reasonable range
+        # self.Visibility = 6
+        self.Visibility = np.clip(self.Visibility, 0.5, 10)  # Restrict visibility to a reasonable range
         ################################# Geometric Loss & Atmospheric Loss ##############################
         FSO_backhaul_gain = []
         for UAV_i in range(self.uavs):
             FSO_backhaul_gain.append(self.FSO_gain(UAV_i,self.Visibility))
+            # print("FSO Backhaul Gain UAV ", UAV_i, ": ", FSO_backhaul_gain[UAV_i])
         # print("Geometric Loss: ", geo_loss)
         RF_backhaul_gain = []
         for UAV_i in range(self.uavs):
@@ -304,6 +321,7 @@ class ENV(gym.Env):
         SNR_FSO_backhaul = []
         for UAV_i in range(self.uavs):
             SNR = math.e * self.P_FSO_backhaul**2 * FSO_backhaul_gain[UAV_i]**2 * self.photon_responsitivity**2/ (2*np.pi*self.noise_power_FSO_backhaul)
+            #print(SNR)
             self.C_FSO[UAV_i] = 1/2 * self.B_FSO_backhaul*math.log2(1+SNR)
             # print("FSO Backhaul Capacity UAV ", UAV_i, ": ", self.C_FSO[UAV_i]/1e9, " Gbps")
             SNR_FSO_backhaul.append(SNR)
@@ -317,10 +335,18 @@ class ENV(gym.Env):
 
         ########## Link Selection between FSO and RF backhaul #############
         for UAV_i in range(self.uavs):
-            if self.C_FSO[UAV_i] >= self.C_RF_backhaul[UAV_i]:
-                self.C_FSO_or_RF[UAV_i] = self.C_FSO[UAV_i]
+            # print("UAV ", UAV_i, ": FSO Backhaul Capacity = ", self.C_FSO[UAV_i]/1e9, " Gbps, RF Backhaul Capacity = ", self.C_RF_backhaul[UAV_i]/1e9, " Gbps")
+            
+            if self.link_switching:
+                if self.C_FSO[UAV_i] >= self.C_RF_backhaul[UAV_i]:
+                    self.C_FSO_or_RF[UAV_i] = self.C_FSO[UAV_i]
+                    self.FSO_RF_switching_mode[UAV_i] = 0
+                else:
+                    self.C_FSO_or_RF[UAV_i] = self.C_RF_backhaul[UAV_i]
+                    self.FSO_RF_switching_mode[UAV_i] = 1
             else:
-                self.C_FSO_or_RF[UAV_i] = self.C_RF_backhaul[UAV_i]
+                self.C_FSO_or_RF[UAV_i] = self.C_FSO[UAV_i]
+                self.FSO_RF_switching_mode[UAV_i] = 0
         ###########################################################################################
 
         ## Distance
@@ -408,13 +434,12 @@ class ENV(gym.Env):
                 y = int(abs(users_list_satisfied[i][1]-1)//self.grid_size)
                 self.heatmap_users_unsatisfied[x,y] += 1
         ##############################################################################
+        # print(self.FSO_RF_switching_mode)
 
 
-
-        O_UAV0 = np.concatenate((self.uavs_location[:,0]/100,self.uavs_location[:,1]/100,self.uavs_location[:,2]/100,np.reshape(self.heatmap_users+self.heatmap_UAV0,self.grid_num**2), np.array([self.C_FSO_or_RF[0] / 1e9])))
-        O_UAV1 = np.concatenate((self.uavs_location[:,0]/100,self.uavs_location[:,1]/100,self.uavs_location[:,2]/100,np.reshape(self.heatmap_users+self.heatmap_UAV1,self.grid_num**2), np.array([self.C_FSO_or_RF[1] / 1e9])))
-        O_UAV2 = np.concatenate((self.uavs_location[:,0]/100,self.uavs_location[:,1]/100,self.uavs_location[:,2]/100,np.reshape(self.heatmap_users+self.heatmap_UAV2,self.grid_num**2), np.array([self.C_FSO_or_RF[2] / 1e9])))
-
+        O_UAV0 = np.concatenate((self.uavs_location[:,0]/100,self.uavs_location[:,1]/100,self.uavs_location[:,2]/100,np.reshape(self.heatmap_users_unsatisfied+self.heatmap_UAV0,self.grid_num**2), np.array([self.C_FSO_or_RF[0] / 1e9])))
+        O_UAV1 = np.concatenate((self.uavs_location[:,0]/100,self.uavs_location[:,1]/100,self.uavs_location[:,2]/100,np.reshape(self.heatmap_users_unsatisfied+self.heatmap_UAV1,self.grid_num**2), np.array([self.C_FSO_or_RF[1] / 1e9])))
+        O_UAV2 = np.concatenate((self.uavs_location[:,0]/100,self.uavs_location[:,1]/100,self.uavs_location[:,2]/100,np.reshape(self.heatmap_users_unsatisfied+self.heatmap_UAV2,self.grid_num**2), np.array([self.C_FSO_or_RF[2] / 1e9])))
         # arr_supported_users = np.array([self.S_UAV0,self.S_UAV1,self.S_UAV2,self.N_UAV0,self.N_UAV1,self.N_UAV2])
         # O_IRS = np.concatenate((self.uavs_location[:,0],self.uavs_location[:,1],self.uavs_location[:,2],np.reshape(self.heatmap_users_unsatisfied,self.grid_num**2),np.reshape(self.heatmap_UAV0,self.grid_num**2),np.reshape(self.heatmap_UAV1,self.grid_num**2),np.reshape(self.heatmap_UAV2,self.grid_num**2),np.reshape(self.heatmap_CLWC(),10**2),self.C_FSO/(1e9),arr_supported_users,self.irs))
         
@@ -426,10 +451,28 @@ class ENV(gym.Env):
         self.S_UAV0 = np.sum(connect_tem[0,:]*self.satisfied_users)
         self.S_UAV1 = np.sum(connect_tem[1,:]*self.satisfied_users)
         self.S_UAV2 = np.sum(connect_tem[2,:]*self.satisfied_users)
+        sum_S = self.S_UAV0+self.S_UAV1+self.S_UAV2
 
-        std_remain_users = np.std(np.array([abs(self.N_UAV0 - self.S_UAV0),abs(self.N_UAV1 - self.S_UAV1),abs(self.N_UAV2 - self.S_UAV2)]))
+        if actions[0] == 0:
+            UAV0_movement = 0
+        else:
+            UAV0_movement = self.v_0*self.tau
 
-        return [O_UAV0, O_UAV1, O_UAV2], [self.S_UAV0/10, self.S_UAV1/10, self.S_UAV2/10], [False, False, False], None, None   # [O_UAV0, O_UAV1, O_UAV2],sum([self.N_UAV0 , self.N_UAV1 , self.N_UAV2])/10
+        if actions[1] == 0:
+            UAV1_movement = 0
+        else:
+            UAV1_movement = self.v_0*self.tau
+
+        if actions[2] == 0:
+            UAV2_movement = 0
+        else:
+            UAV2_movement = self.v_0*self.tau
+
+        weight_power = 0.01
+        
+        # print(weight_power*(self.power_consumption(UAV0_movement)))
+
+        return [O_UAV0, O_UAV1, O_UAV2], [sum_S+self.S_UAV0 - weight_power*(self.power_consumption(UAV0_movement)), sum_S+self.S_UAV1 - weight_power*(self.power_consumption(UAV1_movement)), sum_S+self.S_UAV2 - weight_power*(self.power_consumption(UAV2_movement))], [False]*3, [self.S_UAV0, self.S_UAV1, self.S_UAV2], self.Visibility   # [O_UAV0, O_UAV1, O_UAV2],sum([self.N_UAV0 , self.N_UAV1 , self.N_UAV2])/10
     
     def power_allocation(self,gain_UAV):
         P_total_needed = np.zeros((self.uavs,self.users))
@@ -444,20 +487,37 @@ class ENV(gym.Env):
         return P_total_needed_index, P_total_needed
     def plot(self):
         ######################################### UAVs' colour ################################
-        color_uav = ['red','green','blue']
-        plt.rcParams.update({'font.size': 17})
+        color_uav = ['purple','green','blue']
+        plt.rcParams.update({'font.size': 15})
         ######################################### For Visualization ################################
 
         ## Distance
         d_UAV = self.distance_UAVs_users()
 
+        ######################################### Visibility ################################
+
+        import matplotlib.colors as mcolors
+        import matplotlib.cm as cm
+        cmap = ListedColormap(plt.cm.bone(np.linspace(0.4, 1, 256)))
+        norm = mcolors.Normalize(vmin=0.5, vmax=10)
+        # Convert visibility to color
+        bg_color = cmap(norm(self.Visibility))
+        fig, ax = plt.subplots()
+        # Set background color
+        ax.set_facecolor(bg_color)
+        # Create colorbar
+        sm = cm.ScalarMappable(norm=norm, cmap=cmap)
+        sm.set_array([])
+
+        cbar = fig.colorbar(sm, ax=ax)
+        cbar.set_label('Visibility (km)')
         # ################################## UAVs' Coverage #############################################
 
         # Lấy axes hiện tại
         ax = plt.gca()
         # Vẽ hình tròn quanh điểm
         for UAV_i in range(self.uavs):
-            ax.add_patch(Circle((self.uavs_location[0,UAV_i],self.uavs_location[1,UAV_i]), self.UAV_coverage, fill=False, color = color_uav[UAV_i], linewidth=1))
+            ax.add_patch(Circle((self.uavs_location[0,UAV_i],self.uavs_location[1,UAV_i]), self.UAV_coverage, fill=False, color = 'black', linewidth=1)) #color_uav[UAV_i]
             plt.gca().set_aspect('equal')
         
         # Cài đặt giới hạn hiển thị
@@ -472,30 +532,66 @@ class ENV(gym.Env):
         # plt.scatter(self.users_location[0,:],self.users_location[1,:], marker = 'o', color = 'c')
         # plt.scatter(self.uavs_location[0,0],self.uavs_location[1,0], label = 'UAV0', marker = ',', color = 'r',linewidths=1,edgecolors='black')
         ######### UAVs ############
+        from matplotlib.offsetbox import OffsetImage, AnnotationBbox
+        import imageio.v3 as iio  # Used to read images, or use plt.imread
+        # fig, ax2 = plt.subplots()
+        def add_icon(ax, image_path, x, y, zoom=0.1):
+            """
+            Places an image at a specific (x, y) coordinate on the plot.
+            """
+            try:
+                # Load the image
+                img = iio.imread(image_path)
+                
+                # Create the OffsetImage object to handle scaling
+                imagebox = OffsetImage(img, zoom=zoom)
+                
+                # Position the image box at the data coordinates (x, y)
+                ab = AnnotationBbox(imagebox, (x, y), frameon=False)
+                
+                # Add it to the axes
+                ax.add_artist(ab)
+            except Exception as e:
+                print(f"Could not load image: {e}")
         for UAV_i in range(self.uavs): # self.uavs
-            plt.scatter(self.uavs_location[0,UAV_i],self.uavs_location[1,UAV_i], label = 'UAV' + str(UAV_i+1), marker = ',', color = color_uav[UAV_i] ,linewidths=1,edgecolors='black',s=50)
-
+            #plt.scatter(self.uavs_location[0,UAV_i],self.uavs_location[1,UAV_i], label = 'UAV' + str(UAV_i+1), marker = ',', color = color_uav[UAV_i] ,linewidths=1,edgecolors='black',s=50)
+            add_icon(ax, 'drone.png', x=self.uavs_location[0,UAV_i], y=self.uavs_location[1,UAV_i], zoom=0.06)
+            ax.text(self.uavs_location[0,UAV_i] + 20, self.uavs_location[1,UAV_i] + 120, f"UAV {UAV_i+1}", fontsize=8, fontweight='bold', bbox=dict(facecolor='white', alpha=0.9, edgecolor='none', pad=2))
+            #### draw FSO backhaul link
+            if self.FSO_RF_switching_mode[UAV_i] == 0: # FSO backhaul
+                plt.plot([0, self.uavs_location[0,UAV_i]], [0, self.uavs_location[1,UAV_i]],color='red', label='FSO Backhaul Link' if UAV_i == 0 else None, linewidth=2) # FSO backhaul link
         ######## Users ############
         connect_tem = self.users_inside_UAV_coverage(d_UAV)
+
+        ########## Base station ############
+        add_icon(ax, 'BS.png', x=0, y=80, zoom=0.07) # Legend for user
+        ax.text(-30, 230, "Base Station", fontsize=9, fontweight='bold', bbox=dict(facecolor='white', alpha=0.9, edgecolor='none', pad=2))
+        
+        ########## Users ############
         for user_i in range(self.users):
             if connect_tem[0,user_i] == 1 and self.satisfied_users[user_i] == 0:
-                plt.scatter(self.users_location[0,user_i],self.users_location[1,user_i], marker = '^', color = color_uav[0],s=20)
+                plt.scatter(self.users_location[0,user_i],self.users_location[1,user_i], marker = 'o', color = 'gray',s=8)
             elif connect_tem[0,user_i] == 1 and self.satisfied_users[user_i] == 1:
-                plt.scatter(self.users_location[0,user_i],self.users_location[1,user_i], marker = 'o', color = color_uav[0],s=20,linewidths=1,edgecolors='black')
+                #add_icon(ax, 'MU_served.png', x=self.users_location[0,user_i], y=self.users_location[1,user_i], zoom=0.015)
+                plt.scatter(self.users_location[0,user_i],self.users_location[1,user_i], marker = 'o', color = color_uav[0],s=15,linewidths=1,edgecolors='black')
             elif connect_tem[1,user_i] == 1 and self.satisfied_users[user_i] == 0:
-                plt.scatter(self.users_location[0,user_i],self.users_location[1,user_i], marker = '^', color = color_uav[1],s=20)
+                plt.scatter(self.users_location[0,user_i],self.users_location[1,user_i], marker = 'o', color = 'gray',s=8)
             elif connect_tem[1,user_i] == 1 and self.satisfied_users[user_i] == 1:
-                plt.scatter(self.users_location[0,user_i],self.users_location[1,user_i], marker = 'o', color = color_uav[1],s=20,edgecolors='black')
+                #add_icon(ax, 'MU_served.png', x=self.users_location[0,user_i], y=self.users_location[1,user_i], zoom=0.015)
+                plt.scatter(self.users_location[0,user_i],self.users_location[1,user_i], marker = 'o', color = color_uav[1],s=15,linewidths=1,edgecolors='black')
             elif connect_tem[2,user_i] == 1 and self.satisfied_users[user_i] == 0:
-                plt.scatter(self.users_location[0,user_i],self.users_location[1,user_i], marker = '^', color = color_uav[2],s=20)
+                plt.scatter(self.users_location[0,user_i],self.users_location[1,user_i], marker = 'o', color = 'gray',s=8)
             elif connect_tem[2,user_i] == 1 and self.satisfied_users[user_i] == 1:
-                plt.scatter(self.users_location[0,user_i],self.users_location[1,user_i], marker = 'o', color = color_uav[2],s=20,edgecolors='black')
+                #add_icon(ax, 'MU_served.png', x=self.users_location[0,user_i], y=self.users_location[1,user_i], zoom=0.015)
+                plt.scatter(self.users_location[0,user_i],self.users_location[1,user_i], marker = 'o', color = color_uav[2],s=15,linewidths=1,edgecolors='black')
+                #plt.scatter(self.users_location[0,user_i],self.users_location[1,user_i], marker = 'o', color = color_uav[2],s=25,linewidths=1,edgecolors='black')
             else:
-                plt.scatter(self.users_location[0,user_i],self.users_location[1,user_i], marker = '^', color = 'gray',s=20)
+                plt.scatter(self.users_location[0,user_i],self.users_location[1,user_i], marker = 'o', color = 'gray',s=8)
 
-        plt.scatter(self.UAV0_behavior[0,:],self.UAV0_behavior[1,:], color = 'r', s=0.5, alpha=0.4)
-        plt.scatter(self.UAV1_behavior[0,:],self.UAV1_behavior[1,:], color = 'g', s=0.5, alpha=0.4)
-        plt.scatter(self.UAV2_behavior[0,:],self.UAV2_behavior[1,:], color = 'b', s=0.5, alpha=0.4)
+        plt.scatter(self.UAV0_behavior[0,:],self.UAV0_behavior[1,:], color = 'black', s=0.5, alpha=0.4) # 'r'
+        plt.scatter(self.UAV1_behavior[0,:],self.UAV1_behavior[1,:], color = 'black', s=0.5, alpha=0.4) # 'g'
+        plt.scatter(self.UAV2_behavior[0,:],self.UAV2_behavior[1,:], color = 'black', s=0.5, alpha=0.4) # 'b'
+            
         plt.xlabel('x(m)')
         plt.ylabel('y(m)')
         # plt.title('IRS-assisted FSO Communication in UAV Environment \n' + 'Step '+ str(self.step_))
@@ -547,7 +643,12 @@ class ENV(gym.Env):
 
         # Set seed for reproducible user distribution only
         # rng = np.random.default_rng(42)
-        self.users_location = np.clip(np.random.normal(loc=1000, scale=300, size=(2, self.users)),0, 1999)
+        if self.test:
+            np.random.seed(42)  # Set seed for reproducibility in test mode
+            self.users_location = np.clip(np.random.normal(loc=1000, scale=300, size=(2, self.users)),0, 1999)
+        else: 
+            self.users_location = np.clip(np.random.normal(loc=1000, scale=300, size=(2, self.users)),0, 1999)
+
         self.satisfied_users = np.zeros(self.users)
         self.UAV0_behavior = np.zeros((2, self.max_step))
         self.UAV1_behavior = np.zeros((2, self.max_step))
@@ -580,12 +681,12 @@ class ENV(gym.Env):
 
         ####### Observations ######
 
-        O_UAV0 = np.concatenate((self.uavs_location[:,0]/100,self.uavs_location[:,1]/100,self.uavs_location[:,2]/100,np.reshape(self.heatmap_users+self.heatmap_UAV0,self.grid_num**2), np.array([self.C_FSO_or_RF[0] / 1e9])))
-        O_UAV1 = np.concatenate((self.uavs_location[:,0]/100,self.uavs_location[:,1]/100,self.uavs_location[:,2]/100,np.reshape(self.heatmap_users+self.heatmap_UAV1,self.grid_num**2), np.array([self.C_FSO_or_RF[1] / 1e9])))
-        O_UAV2 = np.concatenate((self.uavs_location[:,0]/100,self.uavs_location[:,1]/100,self.uavs_location[:,2]/100,np.reshape(self.heatmap_users+self.heatmap_UAV2,self.grid_num**2), np.array([self.C_FSO_or_RF[2] / 1e9])))
+
+        O_UAV0 = np.concatenate((self.uavs_location[:,0]/100,self.uavs_location[:,1]/100,self.uavs_location[:,2]/100,np.reshape(self.heatmap_users_unsatisfied+self.heatmap_UAV0,self.grid_num**2), np.array([self.C_FSO_or_RF[0] / 1e9])))
+        O_UAV1 = np.concatenate((self.uavs_location[:,0]/100,self.uavs_location[:,1]/100,self.uavs_location[:,2]/100,np.reshape(self.heatmap_users_unsatisfied+self.heatmap_UAV1,self.grid_num**2), np.array([self.C_FSO_or_RF[1] / 1e9])))
+        O_UAV2 = np.concatenate((self.uavs_location[:,0]/100,self.uavs_location[:,1]/100,self.uavs_location[:,2]/100,np.reshape(self.heatmap_users_unsatisfied+self.heatmap_UAV2,self.grid_num**2), np.array([self.C_FSO_or_RF[2] / 1e9])))
 
         arr_supported_users = np.array([self.S_UAV0,self.S_UAV1,self.S_UAV2,self.N_UAV0,self.N_UAV1,self.N_UAV2])
-
         return [O_UAV0, O_UAV1, O_UAV2]
     
 

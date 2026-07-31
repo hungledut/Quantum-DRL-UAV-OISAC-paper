@@ -51,13 +51,13 @@ optimizer = [optim.Adam(policy_net[i].parameters(), lr=learning_rate) for i in r
 memory = [deque(maxlen=memory_size) for _ in range(3)]
 
 # Function to choose action using epsilon-greedy policy
-def select_action(state, epsilon):
+def select_action(state, epsilon, policy_network):
     rand_value = random.random()
     if rand_value < epsilon:
         return env.action_space.sample()  # Explore
     else:
         state = torch.FloatTensor(state).unsqueeze(0)
-        q_values = policy_net[0](state)
+        q_values = policy_network(state)
         return torch.argmax(q_values).item()  # Exploit
 
 # Function to optimize the model using experience replay
@@ -110,7 +110,7 @@ for episode in range(episodes):
         # Select action
         actions = []
         for i in range(3):
-            action = select_action(state[i], epsilon)
+            action = select_action(state[i], epsilon, policy_net[i])
             actions.append(action)
         # action = select_action(state, epsilon)
         # print(actions)

@@ -145,7 +145,7 @@ class Policy(tq.QuantumModule):
 
 
 if __name__ == '__main__':
-    link_switching = False
+    link_switching = True
     env = ENV(link_switching=link_switching, test = True, seed=350) #render_mode="human"
     policy = [Policy().to(device) for _ in range(3)]
     for i in range(3):
@@ -165,7 +165,7 @@ if __name__ == '__main__':
         number_of_sp_users_UAV1.append(sp_users[1])
         number_of_sp_users_UAV2.append(sp_users[2])
         Visibility.append(visibility)
-        if t%50==0:
+        if t%10==0:
             env.plot()
         print(f"Step: {t}, SP Users: {sp_users}")
     if link_switching:
