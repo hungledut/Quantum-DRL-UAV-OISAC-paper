@@ -1,3 +1,3 @@
-## Quantum Deep Policy Gradient for UAV Placement under Dynamic Backhaul and Access Networks
+## Quantum Deep Policy Gradient Reinforcement Learning
 
 
