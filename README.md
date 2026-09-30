@@ -11,6 +11,7 @@ py QDRL_testing.py
 ~~~
 
 ### Paper citation
+~~~
 @inproceedings{le2026quantumDRL,
   title={Quantum DRL-Based UAV Placement with Optical Sensing-Enabled Hybrid FSO/RF Backhaul Design},
   author={Le, Hung V and Le, Hoang D and Dao, Duy-Tuan and Pham, Anh T},
@@ -19,3 +20,4 @@ py QDRL_testing.py
   year={2026},
   organization={IEEE}
 }
+~~~
