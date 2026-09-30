@@ -10,3 +10,12 @@ py QuantumDRL_MultiUAV.py
 py QDRL_testing.py
 ~~~
 
+### Paper citation
+@inproceedings{le2026quantumDRL,
+  title={Quantum DRL-Based UAV Placement with Optical Sensing-Enabled Hybrid FSO/RF Backhaul Design},
+  author={Le, Hung V and Le, Hoang D and Dao, Duy-Tuan and Pham, Anh T},
+  booktitle={2026 IEEE VTS Asia Pacific Wireless Communications Symposium (APWCS)},
+  pages={},
+  year={2026},
+  organization={IEEE}
+}
